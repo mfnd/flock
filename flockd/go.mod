@@ -1,9 +1,10 @@
-module flock
+module flockd
 
 go 1.18
 
 require (
-	github.com/sirupsen/logrus v1.8.1 // indirect
-	golang.org/x/sys v0.0.0-20191026070338-33540a1f6037 // indirect
-	google.golang.org/protobuf v1.28.0 // indirect
+	github.com/sirupsen/logrus v1.8.1
+	google.golang.org/protobuf v1.28.0
 )
+
+require golang.org/x/sys v0.0.0-20220610221304-9f5ed59c137d // indirect

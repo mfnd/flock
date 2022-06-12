@@ -1,10 +1,11 @@
 package main
 
 import (
-	"flock/messages"
+	"flag"
+	"flockd/messages"
+	"fmt"
 	"net"
 	"os"
-	"runtime"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -12,15 +13,27 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const (
-	AnnounceInterval = 3 * time.Second
-)
+var AnnounceInterval int
+var CommandListenerPort int
+var BroadcastListenerPort int
 
 func main() {
+	flag.IntVar(&AnnounceInterval, "announce-interval", 60, "Announce Packet Broadcast Interval")
+	flag.IntVar(&CommandListenerPort, "command-port", 7777, "Port To Listen For Commands")
+	flag.IntVar(&BroadcastListenerPort, "broadcast-port", 6666, "Port to Listen For Broadcasts")
+
+	log.Infof("Announce Interval: %d - Broadcast Port: %d - Command Port: %d", AnnounceInterval, CommandListenerPort, BroadcastListenerPort)
+
 	broadcastChannel := make(chan bool)
 
-	go commandListener(":7777")
-	go discoveryListener(":6666", broadcastChannel)
+	go commandListener()
+	go broadcastListener(broadcastChannel)
+
+	announcer(broadcastChannel)
+}
+
+func announcer(broadcastChannel <-chan bool) error {
+	commands := GetCommander()
 
 	interfaces, err := net.Interfaces()
 	if err != nil {
@@ -37,14 +50,14 @@ func main() {
 		}
 	}
 
-	addr, err := net.ResolveUDPAddr("udp", "255.255.255.255:6666")
+	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("255.255.255.255:%d", BroadcastListenerPort))
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	conn, err := net.DialUDP("udp", nil, addr)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	localIP := conn.LocalAddr().(*net.UDPAddr).IP
@@ -52,10 +65,12 @@ func main() {
 
 	usedIntf := interfacesMapping[localIP.String()]
 
+	commands.EnableWakeOnLan(usedIntf.Name)
+
 	for {
 		hostname, err := os.Hostname()
 		if err != nil {
-			panic(err)
+			log.Error(err)
 		}
 
 		announce := messages.Broadcast{
@@ -83,20 +98,22 @@ func main() {
 
 		select {
 		case <-broadcastChannel:
-		case <-time.After(AnnounceInterval):
+		case <-time.After(time.Duration(AnnounceInterval) * time.Second):
 		}
 	}
 }
 
-func discoveryListener(port string, announceSignal chan<- bool) {
-	addr, err := net.ResolveUDPAddr("udp", port)
+func broadcastListener(announceSignal chan<- bool) {
+	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", BroadcastListenerPort))
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
+		os.Exit(1)
 	}
 
 	conn, err := net.ListenUDP("udp", addr)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
+		os.Exit(1)
 	}
 	defer conn.Close()
 
@@ -106,7 +123,7 @@ func discoveryListener(port string, announceSignal chan<- bool) {
 
 		n, rAddr, _ := conn.ReadFromUDP(buf[:])
 		if err := proto.Unmarshal(buf[:n], &broadcast); err != nil {
-			panic(err)
+			log.Error(err)
 		}
 
 		switch broadcast.Type {
@@ -118,18 +135,13 @@ func discoveryListener(port string, announceSignal chan<- bool) {
 	}
 }
 
-func commandListener(port string) {
-	var commands Commander
-	switch runtime.GOOS {
-	case "windows":
-		commands = WindowsCommander{}
-	case "linux":
-		commands = LinuxCommander{}
-	}
+func commandListener() {
+	commands := GetCommander()
 
-	listen, err := net.Listen("tcp", port)
+	listen, err := net.Listen("tcp", fmt.Sprintf(":%d", CommandListenerPort))
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
+		os.Exit(1)
 	}
 
 	defer listen.Close()
@@ -137,13 +149,13 @@ func commandListener(port string) {
 	for {
 		conn, err := listen.Accept()
 		if err != nil {
-			panic(err)
+			log.Error(err)
 		}
-		go serveCommand(conn, commands)
+		go handleCommand(conn, commands)
 	}
 }
 
-func serveCommand(conn net.Conn, commander Commander) {
+func handleCommand(conn net.Conn, commander Commander) {
 	buf := make([]byte, 4096)
 	len, err := conn.Read(buf)
 	if err != nil {
@@ -158,7 +170,7 @@ func serveCommand(conn net.Conn, commander Commander) {
 	switch message.Command.(type) {
 	case *messages.Command_Shutdown:
 		if message.GetShutdown().Mode == messages.ShutdownCommand_SLEEP {
-			log.Println("Suspend request from ", conn.RemoteAddr().String())
+			log.Info("Suspend request from ", conn.RemoteAddr().String())
 			err = commander.Suspend()
 			if err != nil {
 				log.Error(err)
