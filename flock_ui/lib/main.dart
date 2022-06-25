@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import 'device.dart';
@@ -65,7 +66,7 @@ class DeviceView extends StatelessWidget {
                 Text("Interface: ${e.interfaceName}"),
                 Text("HW Addr: ${e.hwAddr.toString()}"),
                 Text("IP: ${e.ipAddr.address}"),
-                Text("Last seen: ${e.lastSeen.toIso8601String()}"),
+                Text("Last seen: ${DateFormat("yyyy-MM-dd hh:mm").format(e.lastSeen)}"),
               ]
             ),
             trailing: Row(

@@ -2,7 +2,7 @@
     package="com.mfnd.flock_ui">
    <uses-permission android:name="android.permission.INTERNET" />
    <application
-        android:label="flock_ui"
+        android:label="Flock"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

@@ -8,51 +8,9 @@ import 'package:flutter/widgets.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'network.dart';
 import 'proto/flock.pb.dart';
 
-class MACAddress {
-
-  MACAddress.fromString(String hwAddr)
-    : addr = hwAddr.split(':').map((e) => int.parse(e, radix: 16)).toList();
-
-  final List<int> addr;
-
-  @override
-  String toString() {
-    return addr.map((e) => e.toRadixString(16)).join(":");
-  }
-
-}
-
-class NetMask {
-  
-  NetMask.fromInt(int netMask) {
-    mask = [
-      (netMask & 0xFF000000) >> 24,
-      (netMask & 0x00FF0000) >> 16,
-      (netMask & 0x0000FF00) >> 8,
-      netMask & 0x000000FF
-    ];
-  }
-
-  late final List<int> mask;
-
-  int toInt() {
-    return mask[0] << 24 | mask[1] << 16 | mask[2] << 8 | mask[3];
-  }
-
-}
-
-InternetAddress getBroadcastAddress(InternetAddress addr, NetMask netMask) {
-  var raw = addr.rawAddress;
-  for(var i=0; i < 4; i++) {
-    raw[i] &= netMask.mask[i];
-    raw[i] |= ~netMask.mask[i];
-  }
-  var broadcastAddr = InternetAddress.fromRawAddress(raw);
-  print("Broadcast address: $broadcastAddr");
-  return broadcastAddr;
-}
 
 class Device {
   Device({
@@ -72,22 +30,11 @@ class Device {
   DateTime lastSeen;
 
   void wakeUp({int port = 9}) async {
-    List<int> buffer = [
-      0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
-    ];
-    for(var i=0; i < 16; i++) {
-      buffer.addAll(hwAddr.addr);
-    }
-    var socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 9);
-    var broadcastAddr = getBroadcastAddress(ipAddr, netMask);
-    var n = socket.send(buffer, broadcastAddr, 9);
-    if(n == 0) {
-      print("Failed to send datagram");
-    }
+    sendWakeOnLAN(ipAddr, netMask, hwAddr, port: port);
   }
 
   void hibernate() async {
-    var socket = await Socket.connect(ipAddr, 7777);
+    var socket = await Socket.connect(ipAddr, commandPort);
 
     var hibernateCommand = Command(
       shutdown: ShutdownCommand(
@@ -127,18 +74,20 @@ class NetworkModel extends ChangeNotifier {
   void initializePersistence() async {
     var documentPath = await getApplicationDocumentsDirectory();
     persistenceFile = File(join(documentPath.path, "flock.data"));
-    var contents = await persistenceFile!.readAsString();
-    try {
-      for (var decoded in jsonDecode(contents)) {
-        var device = Device.fromJson(decoded);
-        devices[device.name] = device;
+    if(await persistenceFile!.exists()) {
+      var contents = await persistenceFile!.readAsString();
+      try {
+        for (var decoded in jsonDecode(contents)) {
+          var device = Device.fromJson(decoded);
+          devices[device.name] = device;
+        }
+        print("State loaded from $persistenceFile");
+        notifyListeners();
+      } catch (exception) {
+        log(exception.toString());
+        await persistenceFile!.delete();
       }
-    } catch (exception) {
-      log(exception.toString());
-      await persistenceFile!.delete();
     }
-    notifyListeners();
-    print("State loaded from $persistenceFile");
   }
 
 
@@ -151,12 +100,11 @@ class NetworkModel extends ChangeNotifier {
   }
 
   void runAnnounceListener() async {
-    var socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 6666);
+    var socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, broadcastPort);
     socket.listen((event) {
       var packet = socket.receive();
       if(packet != null) {
         var broadcastPacket = Broadcast.fromBuffer(packet.data);
-        print(broadcastPacket);
         if(broadcastPacket.hasAnnounce()) {
           var announcePacket = broadcastPacket.announce;
           var device = devices[announcePacket.name];
@@ -176,7 +124,10 @@ class NetworkModel extends ChangeNotifier {
           notifyListeners();
         }
       }
+    }, onError: (error) {
+      stderr.writeln(error);
     });
+    print("Announce Listener exited");
   }
 
 
