@@ -1,0 +1,14 @@
+# Systemd service configuration for flockd
+
+[Unit]
+Description=Flock Daemon
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Restart=always
+RestartSec=5
+ExecStart=/usr/local/sbin/flockd
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,45 @@
+syntax = "proto3";
+option go_package = "./messages";
+package messages;
+
+
+message Broadcast {
+    enum Type {
+        ANNOUNCE = 0;
+        ANNOUNCE_REQUEST = 1;
+    }
+
+    Type type = 1;
+
+    oneof message {
+        Announce announce = 2;
+        AnnounceRequest announce_request = 3;
+    }
+}
+
+message Announce {
+    string name = 1;
+    string interface = 2;
+    string hw_addr = 3;
+    string ip_addr = 4;
+    string netmask = 5;
+}
+
+message AnnounceRequest {
+
+}
+
+message Command {
+    oneof command {
+        ShutdownCommand shutdown = 1;
+    }
+}
+
+message ShutdownCommand {
+    Mode mode = 1;
+
+    enum Mode {
+        POWER_OFF = 0;
+        SLEEP = 1;
+    }
+}
